@@ -1,26 +1,12 @@
 package main
 
 import (
-	"database/sql"
+    "bufio"
     "fmt"
-	rice "github.com/GeertJohan/go.rice"
-	"github.com/golang-migrate/migrate/v4"
-	"github.com/golang-migrate/migrate/v4/database/sqlite3"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
-	"github.com/golang-migrate/migrate/v4/source/httpfs"
-	_ "github.com/mattn/go-sqlite3"
-    "os"
+    rice "github.com/GeertJohan/go.rice"
+    "io"
+    "io/ioutil"
 )
-
-type log struct{}
-
-func (l *log) Verbose() bool {
-    return true
-}
-
-func (l *log) Printf(f string, v ...interface{}) {
-    fmt.Printf(f, v...)
-}
 
 func main() {
     rice.Debug = true
@@ -30,39 +16,31 @@ func main() {
         panic(err)
     }
 
-    sourceDriver, err := httpfs.New(box.HTTPBox(), "")
+    file, err := box.Open("20200915113656_test1.up.sql")
     if err != nil {
         panic(err)
     }
+    defer file.Close()
 
-    //db, err := sql.Open("sqlite3", "file::memory:?cache=shared")
-    if _, err := os.Stat("./test.db"); err == nil {
-        fmt.Println("Removing test.db")
-        err = os.Remove("./test.db")
-        if err != nil {
-            panic(err)
-        }
+    bufferSize := 200
+
+    b := bufio.NewReaderSize(file, bufferSize)
+    if _, err = b.Peek(bufferSize); err != nil && err != io.EOF {
+        panic(err)
     }
-    db, err := sql.Open("sqlite3", "./test.db")
+
+    br, bw := io.Pipe()
+    go func() {
+        fmt.Println("Begin to write to pipe bw")
+        n, err := b.WriteTo(bw)
+        fmt.Printf("WriteTo wrote %v bytes, err=%v\n", n, err)
+    }()
+
+    content, err := ioutil.ReadAll(br)
     if err != nil {
-        panic(err)
+        fmt.Printf("Error when reading all content through pipe: %v\n", err)
     }
+    fmt.Printf("ReadAll got content: %v", content)
 
-    sqlDriver, err := sqlite3.WithInstance(db, &sqlite3.Config{})
-    if err != nil {
-        panic(err)
-    }
-
-    m, err := migrate.NewWithInstance("embedFs", sourceDriver, "sqlite", sqlDriver)
-    if err != nil {
-        panic(err)
-    }
-
-    m.Log = &log{}
-
-    if err = m.Up(); err != nil && err != migrate.ErrNoChange {
-        panic(err)
-    }
-
-    fmt.Println("Migration finished")
+    fmt.Println("Test finished")
 }
